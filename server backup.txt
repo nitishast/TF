@@ -1,0 +1,732 @@
+## load packages
+library(zoo)
+library(xts)
+library(ggplot2)
+library(reshape2)
+library(devtools)
+library(forecastHybrid)
+library(forecast)
+library(data.table)
+library(DT)
+library(plotly)
+library(dygraphs)
+library(dplyr)
+library(TTR)
+library(gbm)
+library(plotly)
+
+
+K1=Sys.time()
+
+#set theme for ggplot2 graphics
+theme = theme_set(theme_minimal())
+theme = theme_update(legend.position="top",
+                     axis.text.x = element_text(angle = 45, hjust = 1, vjust =1.25))
+
+pubhol <- read.csv('USPublicHolidays.csv',
+                   header=T,
+                   sep=",",
+                   quote='"',
+                   strip.white=T,
+                   stringsAsFactors=F,
+                   fill=T)
+
+pubhol$Date <- zoo::as.Date(pubhol$Date, format = "%d/%m/%Y")
+pubhol$weekday <- weekdays(pubhol$Date)
+
+
+server = function(input,output,session) {
+  
+  ####### READ IN CSV FILE BASED ON SELECTION ####### 
+  mySeries_raw <- reactive({
+    
+    inFile <- input$file1
+    
+    if (is.null(inFile))
+      return(NULL)
+    
+    mySeries <- read.csv(inFile$datapath, 
+                         header = T,
+                         strip.white=T,
+                         stringsAsFactors=F,
+                         fill=T)
+    
+    
+    ####### DYNAMIC DROP DOWN LIST FOR VARIABLES BASED ON INPUT FILE #######
+    # updateSelectInput(session,
+    #                   'i_task_select',
+    #                   label = 'Select Task',
+    #                   choices = names(mySeries[,-1]),
+    #                   names(mySeries[,-1])[1])
+    
+    #convert date format
+    # mySeries$Date <- zoo::as.Date(mySeries$Date, format = "%d/%m/%Y")
+    # 
+    # #remove NAs
+    # mySeries <- mySeries %>% filter(!is.na(Date))
+    # 
+    # #add 'weekday' variable
+    # mySeries$weekday <- weekdays(mySeries$Date)
+    # 
+    # #add public holiday variable for use as exogenous variable
+    # mySeries$pubhol <- ifelse(mySeries$Date %in% pubhol$Date,
+    #                           1,
+    #                           0)
+    # 
+    # #assign id field for visualisations
+    # mySeries$id <- 1:nrow(mySeries)
+    # 
+    # mySeries <- mySeries
+    
+  })
+  
+  
+  ####### DYNAMIC DROP DOWN LIST FOR TASK BASED ON INPUT FILE ####### 
+  # observeEvent(mySeries_raw(), {
+  #   
+  #   mySeries <- mySeries_raw()
+  #   
+  #   updateSelectInput(session, 
+  #                     'i_task_select', 
+  #                     label = 'Select Series',
+  #                     choices = names(select(mySeries, -Date, -pubhol, -id, -weekday)),
+  #                     names(select(mySeries, -Date, -pubhol, -id, -weekday))[1])
+  #   
+  # })
+  
+  
+  # 
+  # ################# READ IN CSV FILE #####################
+  # 
+  #   raw = reactive({
+  #   
+  #   inFile <- input$file1
+  #   
+  #   if (is.null(inFile))
+  #     return(NULL)
+  #   
+  #   data <- read.csv(inFile$datapath, 
+  #                        header = T,
+  #                        strip.white=T,
+  #                        stringsAsFactors=F,
+  #                        fill=T)
+  #   
+  #   # req(input$file1)
+  #   # data = vroom::vroom(input$file1$datapath)
+  #   # 
+  #   n
+  # 
+  # })
+  # 
+  # ########## Selecting the Column names for the series ###########
+  # 
+  # observeEvent(raw(),{
+  #   
+  #   data = raw()
+  #   
+  #   updateSelectInput(session,
+  #                     'i_task_select',
+  #                     label = 'Select Series',
+  #                     choices = names(select(data, -Date, -pubhol, -id, -weekday)),
+  #                     names(select(data, -Date, -pubhol, -id, -weekday))[1])
+  #  })
+  
+  
+  
+  # yax = as.data.frame(raw())
+  # yax
+  #output$preview1 <- renderTable(head(raw(), input$rows))
+  
+  ###### creating summary table or data uploaded  ########
+  
+  ##### table with week data #######
+  output$data_summary_table1 = renderDataTable({
+    
+    # if (is.null(mySeries_raw))
+    #   return(NULL)
+    
+    
+    mySeries <- mySeries_raw()
+    df = as.data.frame(mySeries)
+    train1 = df[,c(1,2)]
+    #head(train1)
+    train1$Day <- weekdays(as.Date(train1$Dates,format = "%m/%d/%Y"))
+    train1$Working <- ifelse(train1$Day == "Saturday" | train1$Day == "Sunday", "Weekend", "Weekday")
+    train1$month <- as.numeric(format(as.Date(train1$Dates,format = "%m/%d/%Y"), "%m"))
+    train1$year <- as.numeric(format(as.Date(train1$Dates,format = "%m/%d/%Y"), "%Y"))
+    train1$WeekNum <- as.POSIXlt(as.Date(train1$Dates,format = "%m/%d/%Y"))
+    train1$WeekNum <- strftime(train1$WeekNum,format="%W")
+    
+    summedupweek = train1 %>%
+      group_by(WeekNum) %>%
+      summarise(Volume = sum(Volume))
+    
+    summedworking = train1 %>%
+      group_by(Working) %>%
+      summarise(Volume = sum(Volume))
+    
+    #sum1 = data.frame(Date=as.Date(character()),
+    #                       stringsAsFactors=FALSE)
+    
+    sum1 <- data.frame(First= min(as.Date(train1$Dates,format = "%m/%d/%Y")),
+                       Last=max(as.Date(train1$Dates,format = "%m/%d/%Y")), 
+                       totalvol=sum(train1$Volume), 
+                       avgdailyvol = mean(train1$Volume),
+                       stringsAsFactors=FALSE) 
+    
+    summedupweek = train1 %>%
+      group_by(WeekNum) %>%
+      summarise(Volume = sum(Volume))
+    
+    summedworking = train1 %>%
+      group_by(Working="Weekday") %>%
+      summarise(Volume = sum(Volume))
+    
+    sum1$First = as.character.Date(sum1$First)
+    sum1$Last = as.character.Date(sum1$Last)
+    #as.character.Date(gbm_dates)
+    #sum1$First = min(as.Date(train1$Dates,format = "%m/%d/%Y"))
+    # sum1$Last = max(as.Date(train1$Dates,format = "%m/%d/%Y"))
+    # sum1$totalvol = sum(train1$Volume)
+    sum1$avgdailyvol = mean(train1$Volume)
+    sum1$avgweelyvol = mean(summedupweek$Volume)
+    sum1$avgweekdays = mean(summedworking$Volume)
+    # 
+    
+    colnames(sum1)[1] ="Start Date"
+    colnames(sum1)[2] ="End Date"
+    colnames(sum1)[3] ="Total Volume"
+    colnames(sum1)[4] ="Daily Average Volume"
+    colnames(sum1)[5] ="Weekly Average Volume"
+    colnames(sum1)[6] ="Working Day Average Volume"
+    #sum1
+    datatable(sum1,rownames = colnames(sum1) )
+    
+  })
+  
+  
+  ####
+  output$str = renderPrint({
+    mySeries <- mySeries_raw()
+    df = as.data.frame(mySeries)
+    train1 = df[,c(1,2)]
+    train1$days <- weekdays(as.Date(train1$Dates,format = "%m/%d/%Y"))
+    train1$weeks <- ifelse(train1$days == "Saturday" | train1$days == "Sunday", "Weekend", "Weekday")
+    train1$month <- as.numeric(format(as.Date(train1$Dates,format = "%m/%d/%Y"), "%m"))
+    train1$year <- as.numeric(format(as.Date(train1$Dates,format = "%m/%d/%Y"), "%Y"))
+    train1$weeknum <- as.POSIXlt(as.Date(train1$Dates,format = "%m/%d/%Y"))
+    train1$weeknum <- strftime(train1$weeknum,format="%W")
+    str(train1)
+  })
+  
+  output$dim = renderTable({
+    
+    mySeries <- mySeries_raw()
+    df = as.data.frame(mySeries)
+    train1 = df[,c(1,2)]
+    #head(train1)
+    train1$Day <- weekdays(as.Date(train1$Dates,format = "%m/%d/%Y"))
+    train1$Working <- ifelse(train1$Day == "Saturday" | train1$Day == "Sunday", "Weekend", "Weekday")
+    train1$month <- as.numeric(format(as.Date(train1$Dates,format = "%m/%d/%Y"), "%m"))
+    train1$year <- as.numeric(format(as.Date(train1$Dates,format = "%m/%d/%Y"), "%Y"))
+    train1$WeekNum <- as.POSIXlt(as.Date(train1$Dates,format = "%m/%d/%Y"))
+    train1$WeekNum <- strftime(train1$WeekNum,format="%W")
+    
+    #head(train1,input$rows)
+    
+    
+    
+    
+    
+    #dim(as.data.frame(raw()))
+  })
+  
+  ##### table with week data #######
+  output$data_summary_table = renderDataTable({
+    mySeries <- mySeries_raw()
+    df = as.data.frame(mySeries)
+    train1 = df[,c(1,2)]
+    #head(train1)
+    train1$Day <- weekdays(as.Date(train1$Dates,format = "%m/%d/%Y"))
+    train1$Working <- ifelse(train1$Day == "Saturday" | train1$Day == "Sunday", "Weekend", "Weekday")
+    train1$month <- as.numeric(format(as.Date(train1$Dates,format = "%m/%d/%Y"), "%m"))
+    train1$year <- as.numeric(format(as.Date(train1$Dates,format = "%m/%d/%Y"), "%Y"))
+    train1$WeekNum <- as.POSIXlt(as.Date(train1$Dates,format = "%m/%d/%Y"))
+    train1$WeekNum <- strftime(train1$WeekNum,format="%W")
+    
+    head(train1,input$rows)
+    # forecast_tb = forecast(model_tbats,h=63)
+    # forecast_tb_df <- with(forecast_tb,
+    #                        data.frame(mean=forecast_tb$mean))
+    train1
+    
+  })
+  ##### summary analysis of the data ######
+  # output$data_summary_table1 = renderDataTable({
+  #   mySeries <- mySeries_raw()
+  #   df = as.data.frame(mySeries)
+  #   train2 = df[,c(1,2)]
+  #   #head(train1)
+  #   
+  #   train2$
+  #   
+  #   train1$Day <- weekdays(as.Date(train1$Dates,format = "%m/%d/%Y"))
+  #   train1$Working <- ifelse(train1$Day == "Saturday" | train1$Day == "Sunday", "Weekend", "Weekday")
+  #   train1$month <- as.numeric(format(as.Date(train1$Dates,format = "%m/%d/%Y"), "%m"))
+  #   train1$year <- as.numeric(format(as.Date(train1$Dates,format = "%m/%d/%Y"), "%Y"))
+  #   train1$WeekNum <- as.POSIXlt(as.Date(train1$Dates,format = "%m/%d/%Y"))
+  #   train1$WeekNum <- strftime(train1$WeekNum,format="%W")
+  #   
+  #   head(train1,input$rows)
+  #   # forecast_tb = forecast(model_tbats,h=63)
+  #   # forecast_tb_df <- with(forecast_tb,
+  #   #                        data.frame(mean=forecast_tb$mean))
+  #   train1
+  #   
+  # })
+  
+  # rv  = reactiveValues(data = rnorm(100))
+  # 
+  # observeEvent(input$normal,{rv$data = rnorm(100)})
+  # observeEvent(input$uniform,{rv$data= runif(100)})
+  # 
+  # output$content = renderTable({
+  #   
+  #   # req(input$file1)
+  #   
+  #   # df = read.csv(input$file1$datapath,
+  #   #               header = input$header,
+  #   #               sep = input$sep,
+  #   #               quote = input$quote)
+  #   # 
+  # })
+  # 
+  # # data = eventReactive(input$go , {
+  # #   rnorm(input$num)
+  # # })
+  # 
+  # 
+  #################### Box Plot ########################
+  
+  output$myBoxplt <- renderPlotly({
+    mySeries <- mySeries_raw()
+    df = as.data.frame(mySeries)
+    train1 = df[,c(1,2)]
+    #head(train1)
+    train1$Day <- weekdays(as.Date(train1$Dates,format = "%m/%d/%Y"))
+    train1$Working <- ifelse(train1$Day == "Saturday" | train1$Day == "Sunday", "Weekend", "Weekday")
+    train1$month <- as.numeric(format(as.Date(train1$Dates,format = "%m/%d/%Y"), "%m"))
+    train1$year <- as.numeric(format(as.Date(train1$Dates,format = "%m/%d/%Y"), "%Y"))
+    train1$WeekNum <- as.POSIXlt(as.Date(train1$Dates,format = "%m/%d/%Y"))
+    train1$WeekNum <- strftime(train1$WeekNum,format="%W")
+    
+    #yax = as.data.frame(datasetInput()[[17]])
+    
+    # ggplot(train1) +
+    #   aes(x = Day, y = Volume) +
+    #   geom_boxplot(fill = "#08306b") +
+    #   labs(title = "Boxplot for 7 Day") +
+    #   theme_gray()
+    
+    p5 <- plot_ly(train1,
+                  y = ~Volume,
+                  color = ~Day,
+                  type = "box",
+                  marker = list(color = '#ffffff')) %>% 
+      layout(title = "Volume By Day of the Week",
+             
+             # titlefont = list(
+             #   family = "Agency FB",
+             #   size = 23,
+             #   color = '#000000'),
+             # font = list(
+             #   family = "Agency FB",
+             #   size = 25),
+             # #margin = 10,
+             xaxis = list(title = "Day",
+                          zeroline = FALSE),
+             yaxis = list(title = "Volume",
+                          zeroline = FALSE),
+             paper_bgcolor='#D4F5FB',
+             plot_bgcolor='#000000')
+    p5
+    
+    
+    # P=ggplot(train1, aes(x = train1$Day, y = as.numeric(train1$Volume), 
+    #                      fill = train1$Day))+ geom_boxplot()+ xlab("Day") +
+    #   ylab("Volume")+theme(legend.position = "none")+ggtitle("Volume BOX PLOT by Weekday")
+    # P+ geom_dotplot(binaxis='y', stackdir='center', dotsize=0.5)
+  })
+  
+  ######################## Data Summary tab--  Historical Data #######################################
+  # output$chart7 <- renderGvis({
+  # 
+  #   df = as.data.frame(raw())
+  #   train1 = df[,c(1,2)]
+  #   #head(train1)
+  #   train1$Day <- weekdays(as.Date(train1$Dates,format = "%m/%d/%Y"))
+  #   train1$Working <- ifelse(train1$Day == "Saturday" | train1$Day == "Sunday", "Weekend", "Weekday")
+  #   train1$month <- as.numeric(format(as.Date(train1$Dates,format = "%m/%d/%Y"), "%m"))
+  #   train1$year <- as.numeric(format(as.Date(train1$Dates,format = "%m/%d/%Y"), "%Y"))
+  #   train1$WeekNum <- as.POSIXlt(as.Date(train1$Dates,format = "%m/%d/%Y"))
+  #   train1$WeekNum <- strftime(train1$WeekNum,format="%W")
+  # 
+  #   dashed = gvisLineChart(train1,xvar=colnames(train1), yvar=c(colnames(train1)[2],colnames(train1)[4]),
+  #                          options=list(
+  # 
+  #                            title="			Historical Data Trend		 " ,
+  #                            #backgroundColor="#D3D3D3",
+  # 
+  #                            titleTextStyle="{color:'blue',fontName:'TimesNewRoman',fontSize:28,bold: true}",
+  # 
+  #                            vAxis="{title:'Volume',gridlines:{color:'#DCDCDC', count:6}}",
+  # 
+  #                            hAxis="{title:'Date', titleTextStyle:{color:'black'}}",
+  #                            series="[{color:'#008B8B', targetAxisIndex: 0,lineWidth: 2},
+  #               {color: 'red',lineWidth: 5}]",
+  # 
+  #                            legend="bottom",
+  # 
+  #                            width=950,height=250))
+  #   plot(dashed)
+  # 
+  # })
+  # 
+  
+  ###### Histogram and plot ############
+  output$hist = renderPlotly({
+    # hist(data(),
+    #      main = isolate({input$title}))
+    #yax = as.data.frame(raw())
+    mySeries <- mySeries_raw()
+    df = as.data.frame(mySeries)
+    volume = as.numeric(mySeries$Volume)
+    ts = ts(volume,frequency = 365.25,start = c(2019,1))
+    # ts_plot(ts,
+    #         title = "Daily Volumes of PI Cancellation",
+    #         Ytitle = "Count")
+    #   #geom_smooth()
+    # ggplot(mySeries) +
+    #   aes(x = mySeries$Dates, weight = mySeries$Volume) +
+    #   geom_bar(fill = "#08306b") +
+    #   theme_minimal()
+    mySeries <- mySeries_raw()
+    df = as.data.frame(mySeries)
+    train1 = df[,c(1,2)]
+    
+    
+    
+    withProgress(message = 'Visualising Data!',
+                 detail = 'Detecting Trends...',
+                 value = 0.1,
+                 min = 0,
+                 max = 1, {
+                   setProgress()
+                   
+                   #TBATS smoothing
+                   # y = year(as.Date(train1$Dates))
+                   #m = month(as.Date(train1$Dates))
+                   train1$Dates=as.Date(train1$Dates,format = "%m/%d/%Y")
+                   fig <- plot_ly(train1, x = train1$Dates, y = train1$Volume, type = 'scatter', mode = 'lines')
+                   fig <- fig %>% layout(
+                     title = "Daily Volume Trends",
+                     # titlefont = list(
+                     # #   family = "Agency FB",
+                     # #   size = 25,
+                     # color = '#FFFFFF'),
+                     # font = list(
+                     #   family = "Agency FB",
+                     #   size = 25),
+                     # #margin = 3,
+                     # xaxis = list(title = "Month"),
+                     # yaxis = list(title = "Volume"),
+                     # # margin = list(l = 65),
+                     paper_bgcolor='#D4F5FB',
+                       plot_bgcolor='#000000'
+                   )
+                   Sys.sleep(1)
+                   fig
+                 })
+    #fig
+    
+    
+    # train1$Dates=as.Date(train1$Dates,format = "%m/%d/%Y")
+    # fig <- plot_ly(train1, x = train1$Dates, y = train1$Volume, type = 'scatter', mode = 'lines')
+    # fig <- fig %>% layout(
+    #   title = "Daily Volume Trends",
+    #   xaxis = list(title = "Month"),
+    #   yaxis = list(title = "Volume"),
+    #   margin = list(l = 65)
+    # )
+    # fig
+    
+    #plot(ts)
+  })
+  
+  ################ TBATS MODELS ######################
+  
+  output$p_TBATS = renderPlot({
+    
+    mySeries <- mySeries_raw()
+    df = as.data.frame(mySeries)
+    
+    train1 = df[,c(1,2)]
+    volume = as.numeric(mySeries$Volume)
+    #ts = ts(volume,frequency = 365.25,start = c(2019,1))
+    #head(train1)
+    
+    ## creating timeseries with the file
+    #y = year(as.Date(train1$Dates))
+    #m = month(as.Date(train1$Dates))
+    # myts = ts(volume,frequency = 365.25,start = c(2019,1))
+    # 
+    # model_tbats = tbats(myts)
+    # 
+    # forecast_tbast = forecast(model_tbats,h=63)
+    # 
+    # plot(forecast_tbast)
+    
+    withProgress(message = 'Building TBATS model... ',
+                 detail = 'This may take a few seconds',
+                 value = 0.1,
+                 min = 0,
+                 max = 1, {
+                   setProgress()
+                   
+                   #TBATS smoothing
+                   # y = year(as.Date(train1$Dates))
+                   #m = month(as.Date(train1$Dates))
+                   myts = ts(volume,frequency = 365.25,start = c(2019,1))
+                   
+                   model_tbats = tbats(myts)
+                   
+                   forecast_tbast = forecast(model_tbats,h=63)
+                 })
+    
+    
+    plot(forecast_tbast)
+    
+    
+    
+    output$time_series_table = renderDataTable({
+      train1$Dates = as.Date(train1$Dates,format = "%m/%d/%Y")
+      forecast_tb = forecast(model_tbats,h=63)
+      dates = seq(from = as.Date(train1$Dates[length(train1$Dates)]+1), to = (train1$Dates[length(train1$Dates)] + 63), by = 'day')
+      df = data.frame(dates,floor(forecast_tb$mean))
+      colnames(df)[1] ="Dates"
+      colnames(df)[2] ="Forecast Values"
+      df
+      #forecast_tb_df <- with(forecast_tb,data.frame(mean=forecast_tb$mean))
+    }
+    )
+    output$weekly = renderDataTable({
+      
+      train1$Dates = as.Date(train1$Dates,format = "%m/%d/%Y")
+      forecast_tb = forecast(model_tbats,h=63)
+      dates = seq(from = as.Date(train1$Dates[length(train1$Dates)]+1), to = (train1$Dates[length(train1$Dates)] + 63), by = 'day')
+      df_forecast_tbats = data.frame(dates,floor(forecast_tb$mean))
+      colnames(df_forecast_tbats)[1] ="Dates"
+      colnames(df_forecast_tbats)[2] ="Volume"
+      df_forecast_tbats$WeekNum <- as.POSIXlt(as.Date(df_forecast_tbats$Dates,format = "%m/%d/%Y"))
+      df_forecast_tbats$WeekNum <- strftime(df_forecast_tbats$WeekNum,format="%W")
+      
+      summedup = df_forecast_tbats %>%
+        group_by(WeekNum) %>%
+        summarise(Volume = sum(Volume))
+      
+      summedup
+    })
+    
+    thedata1 <- reactive({
+      train1$Dates = as.Date(train1$Dates,format = "%m/%d/%Y")
+      forecast_tb = forecast(model_tbats,h=63)
+      dates = seq(from = as.Date(train1$Dates[length(train1$Dates)]+1), to = (train1$Dates[length(train1$Dates)] + 63), by = 'day')
+      df = data.frame(dates,floor(forecast_tb$mean))
+      colnames(df)[1] ="Dates"
+      colnames(df)[2] ="Forecast Values"
+      df 
+    })
+    ######### csv file download for downloading the forecast #####
+    output$download1 <- downloadHandler(
+      
+      
+      filename = function() {
+        paste("Forecasted Values", K1, '.csv')
+      },
+      
+      content = function(file) {
+        #forecast_tb = forecast(model_tbats,h=63)
+        write.csv(thedata1(), file)
+        
+      })
+    
+    thedata2 <- reactive({
+      train1$Dates = as.Date(train1$Dates,format = "%m/%d/%Y")
+      forecast_tb = forecast(model_tbats,h=63)
+      dates = seq(from = as.Date(train1$Dates[length(train1$Dates)]+1), to = (train1$Dates[length(train1$Dates)] + 63), by = 'day')
+      df_forecast_tbats = data.frame(dates,floor(forecast_tb$mean))
+      colnames(df_forecast_tbats)[1] ="Dates"
+      colnames(df_forecast_tbats)[2] ="Volume"
+      df_forecast_tbats$WeekNum <- as.POSIXlt(as.Date(df_forecast_tbats$Dates,format = "%m/%d/%Y"))
+      df_forecast_tbats$WeekNum <- strftime(df_forecast_tbats$WeekNum,format="%W")
+      
+      summedup = df_forecast_tbats %>%
+        group_by(WeekNum) %>%
+        summarise(Volume = sum(Volume))
+      
+      summedup
+    })
+    ######### csv file download for downloading the forecast #####
+    output$download2 <- downloadHandler(
+      
+      
+      filename = function() {
+        paste("Forecasted Values", K1, '.csv')
+      },
+      
+      content = function(file) {
+        #forecast_tb = forecast(model_tbats,h=63)
+        write.csv(thedata2(), file)
+        
+      })
+    
+    # output$downloader <- downloadHandler(
+    #   
+    #   filename = function() {
+    #     paste0({with(forecast(model_tbats,h=63),
+    #            data.frame(mean=forecast_tb$mean))}, ".csv")
+    #   },
+    #   content = function(file) {
+    #     write.csv(data(), file)
+    #   }
+    # )
+    
+  })  
+  
+  
+  
+  
+  ########### GBM with moving average ###################
+  
+  output$p_GBM = renderPlot({
+    
+    mySeries <- mySeries_raw()
+    df = as.data.frame(mySeries)
+    
+    train1 = df[,c(1,2)]
+    #str(train1)
+    train1$Day <- weekdays(as.Date(train1$Dates,format = "%m/%d/%Y"))
+    train1$Working <- ifelse(train1$Day == "Saturday" | train1$Day == "Sunday", "Weekend", "Weekday")
+    train1$month <- as.numeric(format(as.Date(train1$Dates,format = "%m/%d/%Y"), "%m"))
+    train1$year <- as.numeric(format(as.Date(train1$Dates,format = "%m/%d/%Y"), "%Y"))
+    train1$WeekNum <- as.POSIXlt(as.Date(train1$Dates,format = "%m/%d/%Y"))
+    train1$WeekNum <- strftime(train1$WeekNum,format="%W")
+    
+    #### change into factors 
+    
+    train1$Day = as.factor(train1$Day)
+    train1$Working <- as.factor(train1$Working)
+    train1$month <- as.factor(train1$month) 
+    train1$year <- as.factor(train1$year)
+    train1$WeekNum <- as.factor(train1$WeekNum) 
+    #str(train1)
+    ##### taking Moving average for 7 Days
+    
+    set.seed(150)
+    
+    volume = as.numeric(train1$Volume)
+    
+    train1$ma = EMA(train1$Volume,7)
+    train1 = train1[-(1:7),] ##### removing the 1st 7 rows
+    #str(train1)
+    
+    train1$Dates = as.Date(train1$Dates,format = "%m/%d/%Y")
+    ######## creating training dataset and formula for GBM ##########
+    #train1$Dates = zoo::as.Date(train1$Dates, format = "%d/%m/%Y")
+    #values = seq(from = as.Date(pubhol$Date[length(pubhol$Date)]), to = (pubhol$Date[length(pubhol$Date)] + 63), by = 'day')
+    gbm_dates = seq(from = as.Date(train1$Dates[length(train1$Dates)]+1), to = (train1$Dates[length(train1$Dates)] + 62), by = 'day')
+    #train1$Dates = as.Date(train1$Dates,format = "%m/%d/%Y")
+    #class(gbm_dates)
+    #gbm_dates = as.Date(gbm_dates)
+    gbm_dates = as.character.Date(gbm_dates)
+    fore_gbm_df = merge
+    #train1$Dates = zoo::as.Date(train1$Dates, format = "%d/%m/%Y")
+    #head(gbm_dates,20)
+    
+    ####### fitting the model with MA ######
+    withProgress(message = 'Building GBM model... ',
+                 detail = 'This may take a few seconds',
+                 value = 0.1,
+                 min = 0,
+                 max = 1, {
+                   setProgress()
+                   
+                   #TBATS smoothing
+                   # y = year(as.Date(train1$Dates))
+                   #m = month(as.Date(train1$Dates))
+                   formula.gbm = train1$Volume~(Day + Working + month + year + WeekNum)*ma
+                   
+                   fit.gbm = gbm(formula.gbm,data = train1,n.trees = 100000)
+                 })
+    # 
+    # formula.gbm = train1$Volume~(Day + Working + month + year + WeekNum)*ma
+    # 
+    # fit.gbm = gbm(formula.gbm,data = train1,n.trees = 100000)
+    
+    #### forecasting and making dataframe ######
+    
+    
+    
+    forecast.gbm = predict.gbm(fit.gbm,n.trees = 100000)
+    
+    ## tabular form 
+    
+    df.gbm = data.frame((floor(forecast.gbm)))
+    colnames(df.gbm)[1] = "GBM forecast"
+    
+    plot.ts(df.gbm[(1:63),])
+    
+    #plot.ts(df.gbm)
+    
+    output$time_series_table = renderDataTable({
+      train1$Dates = as.Date(train1$Dates,format = "%m/%d/%Y")
+      #forecast_tb = forecast(model_tbats,h=63)
+      forecast.gbm
+      df.gbm = data.frame((floor(forecast.gbm)))
+      value = df.gbm[(1:63),]
+      dates = seq(from = as.Date(train1$Dates[length(train1$Dates)]+1), to = (train1$Dates[length(train1$Dates)] + 63), by = 'day')
+      df = data.frame(dates,value)
+      colnames(df)[1] ="Dates"
+      colnames(df)[2] ="Forecast Values"
+      df
+    })
+    
+    thedata3 <- reactive({
+      train1$Dates = as.Date(train1$Dates,format = "%m/%d/%Y")
+      #forecast_tb = forecast(model_tbats,h=63)
+      forecast.gbm
+      df.gbm = data.frame((floor(forecast.gbm)))
+      value = df.gbm[(1:63),]
+      dates = seq(from = as.Date(train1$Dates[length(train1$Dates)]+1), to = (train1$Dates[length(train1$Dates)] + 63), by = 'day')
+      df = data.frame(dates,value)
+      colnames(df)[1] ="Dates"
+      colnames(df)[2] ="Forecast Values"
+      df
+    })
+    
+    output$download1 <- downloadHandler(
+      
+      
+      filename = function() {
+        paste("Forecasted Values", K1, '.csv')
+      },
+      
+      content = function(file) {
+        #forecast_tb = forecast(model_tbats,h=63)
+        write.csv(thedata1(), file)
+        
+      })
+    
+  })
+  
+}

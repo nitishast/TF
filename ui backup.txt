@@ -1,0 +1,110 @@
+library(shiny)
+library(forecast)
+library(ggplot2)
+library(TSstudio)
+library(googleVis)
+library(plotly)
+
+#set theme for ggplot2 graphics
+theme = theme_set(theme_minimal())
+theme = theme_update(legend.position="top",
+                     axis.text.x = element_text(angle = 45, hjust = 1, vjust =1.25))
+
+csvDummy <- 'https://raw.githubusercontent.com/nitishast/TF/master/PI%20Cancellation.txt'
+#library(thematic)
+
+#library(ts)
+shinyUI(
+  navbarPage(
+    title = "Home",
+    theme = "bootstrap.css",
+    inverse = TRUE,
+    fluid = TRUE,
+    
+    
+    
+    tabPanel("Travellers Volume Forecast", icon = icon("line-chart"),
+             fluidPage(
+               
+               titlePanel('PI Cancellation Volume Forecast',windowTitle = "Workload Forecasting"),
+               
+               fluidRow(
+                 sidebarPanel(
+                   fileInput("file1","choose a file",
+                             multiple = FALSE,
+                             accept = c("text/csv",
+                                        "text/comma-separated-values,text/plain",
+                                        ".csv")),
+                   numericInput("rows",label = "Rows to preview here ",10,min=5),
+                   h5("Please Download Sample Date,Volume-Count CSV file",a("By Clicking here.", href=csvDummy, target="_blank")),
+                   #selectInput(inputId="i_task_select", "Select Series",'',''),
+                   sliderInput(inputId="i_forecast_n","Forecast periods",value=30,min=2,max=120,step=1),
+                   actionButton(inputId="goButton", "Start forecasting!"),
+                   br(),
+                   br(),
+                   #downloadButton('downloader','Download Forecast'),
+                   width = 3),
+                 column(width = 9,
+                        tabsetPanel(type = "tabs",
+                                    wellPanel(
+                                    tabPanel("Data Summary",fluidRow(
+                                      column(width = 6,
+                                             #h4("Forecast Values"),
+                                             #downloadButton('download1',"Download the data"),
+                                             #br(),
+                                             DT::dataTableOutput("data_summary_table")),
+                                      #downloadButton('download1',"Download the data"),
+                                      column(width = 6,
+                                             #h4("Weekly Forecast"),
+                                             #downloadButton('download2',"Download the data"),
+                                             #br(),
+                                             DT::dataTableOutput("data_summary_table1")
+                                             
+                                             
+                                      )
+                                    ),
+                                    icon = icon("bar-chart"),value = 1)),
+                                    tabPanel("Trends",fluidRow(column(width=1)),icon = icon("line-chart"), plotlyOutput("hist"),br(),br(),plotlyOutput("myBoxplt"),value = 1),
+                                    #tabPanel("Data Summary",icon = icon("bar-chart"),DT::dataTableOutput("data_summary_table"),plotOutput("myBoxplt"),value = 2),
+                                    #tabPanel("Data",icon = icon("bar-chart"),tableOutput("dim"),value = 3),
+                                    tabPanel("TBATS", icon = icon("area-chart"), h4("TBATS Model: Exponential smoothing state space model with Box-Cox transformation, ARMA errors, Trend & Seasonal components"), br(),plotOutput("p_TBATS"),  value=4),
+                                    #tabPanel("TBATS",icon = icon("area-chart"),verbatimTextOutput("str"), tableOutput("Model"),value = 4),
+                                    tabPanel("GBM", icon = icon("area-chart"), h4("GBM MODEL: Gradient Boosted Model"), br(),plotOutput("p_GBM"),  value=5),
+                                    #tabPanel("Forecasted Value",icon = icon("bar-chart"),value = 5),
+                                    
+                                    
+                                    
+                                    
+                                    id = "timeseriesTabs"),
+                 )
+                 
+               ),
+               fluidRow(
+                 column(width = 6,
+                        br(),
+                        br(),
+                        h4("Forecast Values"),
+                        downloadButton('download1',"Download the data"),
+                        br(),
+                        DT::dataTableOutput("time_series_table")),
+                 #downloadButton('download1',"Download the data"),
+                 column(width = 6,
+                        br(),
+                        br(),
+                        h4("Weekly Forecast"),
+                        downloadButton('download2',"Download the data"),
+                        br(),
+                        DT::dataTableOutput("weekly")
+                        
+                 )
+               )
+             )
+             
+    )
+    
+  )
+  
+)
+
+
+
